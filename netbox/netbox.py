@@ -210,12 +210,30 @@ class NetboxAsInventory(object):
         # The value could be None/null.
         if server_name and group_value:
             # If the group not in the inventory it will be add.
-            if group_value not in inventory_dict:
-                inventory_dict.update({group_value: []})
+            if isinstance(group_value, list):
+                if len(group_value) > 1:
+                    for val in group_value:
+                        if val not in inventory_dict:
+                            inventory_dict.update({val: []})
 
-            # If the host not in the group it will be add.
-            if server_name not in inventory_dict[group_value]:
-                inventory_dict[group_value].append(server_name)
+                        # If the host not in the group it will be add.
+                        if server_name not in inventory_dict[val]:
+                            inventory_dict[val].append(server_name)
+                else:
+                    val = group_value[0]
+                    if val not in inventory_dict:
+                        inventory_dict.update({val: []})
+                    # If the host not in the group it will be add.
+                    if server_name not in inventory_dict[val]:
+                        inventory_dict[val].append(server_name)
+
+            else:
+                if group_value not in inventory_dict:
+                    inventory_dict.update({group_value: []})
+
+                # If the host not in the group it will be add.
+                if server_name not in inventory_dict[group_value]:
+                    inventory_dict[group_value].append(server_name)
         return inventory_dict
 
     def add_host_to_inventory(self, groups_categories, inventory_dict, host_data):
@@ -308,7 +326,13 @@ class NetboxAsInventory(object):
                 for var_name, var_data in host_vars[category].items():
                     # This is because "custom_fields" has more than 1 type.
                     # Values inside "custom_fields" could be a key:value or a dict.
-                    if isinstance(data_dict.get(var_data), dict):
+                    if var_data == "config_context":
+                        var_value = data_dict.get(var_data)
+                        if var_value and var_value.get('configuration'):
+                            var_value = var_value['configuration']
+                        else:
+                            var_value = None
+                    elif isinstance(data_dict.get(var_data), dict):
                         var_value = self._get_value_by_path(data_dict, [var_data, key_name], ignore_key_error=True)
                     else:
                         var_value = data_dict.get(var_data)
@@ -349,15 +373,23 @@ class NetboxAsInventory(object):
         """
 
         inventory_dict = dict()
-        netbox_hosts_list = self.get_hosts_list(self.api_url, self.api_token, self.host)
+        properties = ["dcim/devices/", "virtualization/virtual-machines/"]
+        first_run = True
+        for prop in properties:
+            api_url = "{}{}".format(self.api_url, prop)
+            netbox_hosts_list = self.get_hosts_list(api_url, self.api_token, self.host)
 
-        if netbox_hosts_list:
-            inventory_dict.update({"_meta": {"hostvars": {}}})
-            for current_host in netbox_hosts_list:
-                server_name = current_host.get("name")
-                self.add_host_to_inventory(self.group_by, inventory_dict, current_host)
-                host_vars = self.get_host_vars(current_host, self.hosts_vars)
-                inventory_dict = self.update_host_meta_vars(inventory_dict, server_name, host_vars)
+            if netbox_hosts_list:
+                if first_run:
+                    inventory_dict.update({"_meta": {"hostvars": {}}})
+                    first_run = False
+
+                for current_host in netbox_hosts_list:
+                    server_name = current_host.get("name")
+                    self.add_host_to_inventory(self.group_by, inventory_dict, current_host)
+                    host_vars = self.get_host_vars(current_host, self.hosts_vars)
+                    inventory_dict = self.update_host_meta_vars(inventory_dict, server_name, host_vars)
+
         return inventory_dict
 
     def print_inventory_json(self, inventory_dict):
